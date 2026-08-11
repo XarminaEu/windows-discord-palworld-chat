@@ -1,0 +1,36 @@
+name: Build DiscordChatRelay DLL
+
+on:
+  push:
+    paths:
+      - "CppMod/**"
+      - ".github/workflows/build-dll.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Clone RE-UE4SS
+        run: git clone --recursive --depth 1 https://github.com/UE4SS-RE/RE-UE4SS.git CppMod/RE-UE4SS
+
+      - name: Install Rust (von UE4SS benoetigt)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Configure
+        run: cmake -S CppMod -B CppMod/build -G Ninja -DCMAKE_BUILD_TYPE=Game__Shipping__Win64
+
+      - name: Build
+        run: cmake --build CppMod/build --target DiscordChatRelay
+
+      - name: Upload DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: DiscordChatRelay-dll
+          path: CppMod/build/**/main.dll

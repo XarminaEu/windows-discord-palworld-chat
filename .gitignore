@@ -1,0 +1,5 @@
+# Build-Artefakte
+CppMod/build/
+CppMod/RE-UE4SS/
+*.dll
+*.pdb
