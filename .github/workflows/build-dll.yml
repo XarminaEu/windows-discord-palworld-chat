@@ -25,8 +25,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.EPIC_GITHUB_TOKEN }}
         run: |
-          git config --global url."https://x-access-token:${env:GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          if ([string]::IsNullOrEmpty($env:GH_TOKEN)) {
+            Write-Host "::error::Das Repo-Secret EPIC_GITHUB_TOKEN fehlt! Anlegen unter: Settings -> Secrets and variables -> Actions -> New repository secret. Wert: ein GitHub PAT (classic, Scope 'repo') eines Accounts, der mit Epic Games verknuepft ist."
+            exit 1
+          }
+          git config --global url."https://x-access-token:$($env:GH_TOKEN)@github.com/".insteadOf "https://github.com/"
           git clone --recursive --depth 1 --shallow-submodules https://github.com/UE4SS-RE/RE-UE4SS.git CppMod/RE-UE4SS
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Klonen fehlgeschlagen. Pruefe: 1) PAT gueltig + Scope 'repo'? 2) Epic-Einladung in die EpicGames-GitHub-Org angenommen? (E-Mail von GitHub nach der Verknuepfung)"
+            exit 1
+          }
 
       - name: Install Rust (von UE4SS benoetigt)
         uses: dtolnay/rust-toolchain@stable
