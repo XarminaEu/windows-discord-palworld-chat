@@ -14,8 +14,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Clone RE-UE4SS
-        run: git clone --recursive --depth 1 https://github.com/UE4SS-RE/RE-UE4SS.git CppMod/RE-UE4SS
+      # WICHTIG: RE-UE4SS hat ein privates Submodul (Unreal-Pseudocode).
+      # Dafuer muss:
+      #  1. Dein GitHub-Account mit einem Epic-Games-Account verknuepft sein
+      #     (https://www.unrealengine.com/en-US/ue-on-github) und die Einladung
+      #     in die EpicGames-Org angenommen sein
+      #  2. Ein Personal Access Token (classic, Scope "repo") als Repo-Secret
+      #     EPIC_GITHUB_TOKEN hinterlegt sein (Settings -> Secrets -> Actions)
+      - name: Clone RE-UE4SS (inkl. privater UE-Submodule)
+        env:
+          GH_TOKEN: ${{ secrets.EPIC_GITHUB_TOKEN }}
+        run: |
+          git config --global url."https://x-access-token:${env:GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git clone --recursive --depth 1 --shallow-submodules https://github.com/UE4SS-RE/RE-UE4SS.git CppMod/RE-UE4SS
 
       - name: Install Rust (von UE4SS benoetigt)
         uses: dtolnay/rust-toolchain@stable
