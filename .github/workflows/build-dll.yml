@@ -30,6 +30,7 @@ jobs:
             exit 1
           }
           git config --global url."https://x-access-token:$($env:GH_TOKEN)@github.com/".insteadOf "https://github.com/"
+          git config --global --add url."https://x-access-token:$($env:GH_TOKEN)@github.com/".insteadOf "git@github.com:"
           git clone --recursive --depth 1 --shallow-submodules https://github.com/UE4SS-RE/RE-UE4SS.git CppMod/RE-UE4SS
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::Klonen fehlgeschlagen. Pruefe: 1) PAT gueltig + Scope 'repo'? 2) Epic-Einladung in die EpicGames-GitHub-Org angenommen? (E-Mail von GitHub nach der Verknuepfung)"
