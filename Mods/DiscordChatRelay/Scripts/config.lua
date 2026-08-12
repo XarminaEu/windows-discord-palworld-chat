@@ -38,6 +38,27 @@ Config.LeaveFormat = "**{player}** hat den Server verlassen"
 -- Wie oft (Sekunden) die Spielerliste auf Joins/Leaves geprueft wird
 Config.PollIntervalSeconds = 5
 
+-- ------------------------------------------------------------
+-- Server-Online-Nachricht (schoenes Embed beim Start/Neustart)
+-- ------------------------------------------------------------
+
+-- Beim Serverstart eine Embed-Nachricht senden?
+Config.EnableStartupMessage = true
+
+-- Name des Servers (wird im Embed angezeigt)
+Config.ServerName = "Mein Palworld Server"
+
+-- Titel und Text des Embeds ({server} = Servername)
+Config.StartupTitle = "Server Online"
+Config.StartupText = "**{server}** ist wieder online! Viel Spass beim Spielen!"
+
+-- Farbe des Embeds (Dezimalwert; 5763719 = gruen, 15548997 = rot, 3447003 = blau)
+Config.StartupEmbedColor = 5763719
+
+-- Verzoegerung in Sekunden nach Modstart, bevor die Nachricht gesendet wird
+-- (damit der Server wirklich fertig geladen ist)
+Config.StartupDelaySeconds = 15
+
 -- Debug-Ausgaben in der UE4SS-Konsole
 Config.Debug = false
 

@@ -39,21 +39,23 @@ end
 -- ------------------------------------------------------------
 -- Nachricht per Webhook senden (curl.exe, ist bei Windows 10/11 dabei)
 -- ------------------------------------------------------------
-local function SendToDiscord(content)
+local function BuildCommonFields()
+    local fields = ""
+    if Config.BotName and Config.BotName ~= "" then
+        fields = fields .. ',"username":"' .. JsonEscape(Config.BotName) .. '"'
+    end
+    if Config.AvatarUrl and Config.AvatarUrl ~= "" then
+        fields = fields .. ',"avatar_url":"' .. JsonEscape(Config.AvatarUrl) .. '"'
+    end
+    return fields
+end
+
+local function SendPayload(payload, logText)
     if Config.WebhookUrl == nil or Config.WebhookUrl == ""
         or Config.WebhookUrl:find("DEINE_WEBHOOK_ID") then
         Log("WARNUNG: Keine gueltige Webhook-URL in config.lua eingetragen!")
         return
     end
-
-    local payload = '{"content":"' .. JsonEscape(content) .. '"'
-    if Config.BotName and Config.BotName ~= "" then
-        payload = payload .. ',"username":"' .. JsonEscape(Config.BotName) .. '"'
-    end
-    if Config.AvatarUrl and Config.AvatarUrl ~= "" then
-        payload = payload .. ',"avatar_url":"' .. JsonEscape(Config.AvatarUrl) .. '"'
-    end
-    payload = payload .. "}"
 
     -- Payload in Temp-Datei schreiben (vermeidet Escaping-Probleme in der Shell)
     local tmpName = os.getenv("TEMP") .. "\\dcr_" .. tostring(os.time()) .. "_" .. tostring(math.random(100000)) .. ".json"
@@ -72,9 +74,23 @@ local function SendToDiscord(content)
 
     -- Asynchron ausfuehren, damit der Game-Thread nicht blockiert
     ExecuteAsync(function()
-        DebugLog("Sende an Discord: " .. content)
+        DebugLog("Sende an Discord: " .. tostring(logText))
         os.execute('start /B cmd /C "' .. cmd .. '" >nul 2>&1')
     end)
+end
+
+local function SendToDiscord(content)
+    local payload = '{"content":"' .. JsonEscape(content) .. '"' .. BuildCommonFields() .. "}"
+    SendPayload(payload, content)
+end
+
+local function SendEmbedToDiscord(title, description, color)
+    local payload = '{"embeds":[{'
+        .. '"title":"' .. JsonEscape(title) .. '",'
+        .. '"description":"' .. JsonEscape(description) .. '",'
+        .. '"color":' .. tostring(tonumber(color) or 5763719)
+        .. '}]' .. BuildCommonFields() .. "}"
+    SendPayload(payload, "[Embed] " .. title)
 end
 
 -- ------------------------------------------------------------
@@ -212,7 +228,25 @@ local function StartJoinLeaveWatcher()
     Log("Join/Leave-Ueberwachung aktiv (Intervall: " .. tostring(interval / 1000) .. "s).")
 end
 
+-- ------------------------------------------------------------
+-- Server-Online-Embed beim Start/Neustart
+-- ------------------------------------------------------------
+local function SendStartupMessage()
+    if not Config.EnableStartupMessage then
+        return
+    end
+    local delay = (Config.StartupDelaySeconds or 15) * 1000
+    ExecuteWithDelay(delay, function()
+        local server = Config.ServerName or "Palworld Server"
+        local title = (Config.StartupTitle or "Server Online"):gsub("{server}", server)
+        local text = (Config.StartupText or "**{server}** ist wieder online!"):gsub("{server}", server)
+        SendEmbedToDiscord(title, text, Config.StartupEmbedColor)
+        Log("Server-Online-Nachricht gesendet.")
+    end)
+end
+
 math.randomseed(os.time())
-Log("Mod geladen. Version 1.1")
+Log("Mod geladen. Version 1.2")
 RegisterChatHook()
 StartJoinLeaveWatcher()
+SendStartupMessage()
