@@ -1,77 +1,80 @@
-# DiscordChatRelay – Palworld UE4SS Mod (Windows)
+# DiscordChatRelay – Palworld UE4SS Mod (Windows, DLL)
 
-Leitet den Palworld-Ingame-Chat per **Discord-Webhook** in einen bestimmten Discord-Channel weiter.
-Zusätzlich werden **Join/Leave-Nachrichten** gesendet.
+UE4SS-**C++-Mod** für Palworld, der folgendes in einen Discord-Channel postet (per Webhook):
 
-> Es gibt zwei Varianten:
-> - **Lua-Mod** (dieser Ordner, `Mods/DiscordChatRelay`) – sofort nutzbar, kein Kompilieren nötig
-> - **C++/DLL-Mod** (`CppMod/`) – mit automatisch erzeugter `DiscordChatRelay.ini`, muss unter Windows kompiliert werden (siehe `CppMod/README.md`)
+- **Ingame-Chat** (Global / Gilde / Sagen)
+- **Join/Leave-Nachrichten** („Spieler X ist beigetreten / hat verlassen")
+- **Server-Online-Embed** beim Start/Neustart („Server XYZ ist wieder online!")
 
-## Voraussetzungen
-
-- Palworld (Windows, Client als Host oder Dedicated Server)
-- [UE4SS](https://github.com/UE4SS-RE/RE-UE4SS) (bzw. die Palworld-kompatible Variante, z.B. über PalSchema/Experimental Build)
-- Windows 10/11 (nutzt das mitgelieferte `curl.exe`)
+Beim ersten Start legt der Mod **automatisch** an:
+- `DiscordChatRelay.ini` (Konfiguration, im Mod-Ordner)
+- `enabled.txt` (damit der Mod aktiv bleibt)
 
 ## Installation
 
-1. **UE4SS installieren**
-   Den UE4SS-Ordnerinhalt nach:
-   ```
-   Palworld\Pal\Binaries\Win64\
-   ```
-   (Beim Dedicated Server entsprechend `PalServer\Pal\Binaries\Win64\`)
+1. **UE4SS installieren** ([RE-UE4SS](https://github.com/UE4SS-RE/RE-UE4SS), Experimental-Build für Palworld)
+   nach `Palworld\Pal\Binaries\Win64\` (Dedicated Server: `PalServer\Pal\Binaries\Win64\`)
 
-2. **Mod kopieren**
-   Den Ordner `Mods\DiscordChatRelay` aus diesem Verzeichnis nach:
+2. **DLL installieren** – die fertige `main.dll` (aus GitHub Actions → Artifacts → `DiscordChatRelay-dll`) nach:
    ```
-   Palworld\Pal\Binaries\Win64\Mods\DiscordChatRelay
-   ```
-   Die Datei `enabled.txt` im Mod-Ordner aktiviert den Mod automatisch.
-   Alternativ in `Mods\mods.txt` eintragen:
-   ```
-   DiscordChatRelay : 1
+   ...\Win64\Mods\DiscordChatRelay\dlls\main.dll
    ```
 
-3. **Discord-Webhook erstellen**
-   - Discord → gewünschter Channel → ⚙️ Channel bearbeiten → **Integrationen** → **Webhooks** → *Neuer Webhook*
-   - Webhook-URL kopieren
+3. **Spiel/Server einmal starten** → `DiscordChatRelay.ini` + `enabled.txt` werden automatisch erstellt.
 
-4. **Konfigurieren**
-   `Mods\DiscordChatRelay\Scripts\config.lua` öffnen und die Webhook-URL eintragen:
-   ```lua
-   Config.WebhookUrl = "https://discord.com/api/webhooks/....."
-   ```
+4. **Webhook eintragen**: Discord → Channel → ⚙️ → Integrationen → Webhooks → *Neuer Webhook* → URL kopieren
+   und in `Mods\DiscordChatRelay\DiscordChatRelay.ini` bei `WebhookUrl=` einfügen.
 
-5. **Spiel/Server starten** – fertig. Chatnachrichten erscheinen im Discord-Channel.
+5. **Neu starten** – fertig.
 
-## Konfiguration (`config.lua`)
+## Konfiguration (`DiscordChatRelay.ini`)
 
-| Option           | Beschreibung                                                    |
-|------------------|-----------------------------------------------------------------|
-| `WebhookUrl`     | Discord-Webhook-URL des Ziel-Channels                            |
-| `BotName`        | Anzeigename des Webhooks in Discord                              |
-| `AvatarUrl`      | Optionales Avatar-Bild                                           |
-| `MessageFormat`  | Format mit `{sender}`, `{message}`, `{channel}`                  |
-| `ShowCategory`   | Chat-Kategorie (z.B. `[Global]`) voranstellen                    |
-| `CategoryFilter` | Nur bestimmte Kategorien senden, z.B. `{ "Global" }` – leer = alle |
-| `Debug`          | Debug-Ausgaben in der UE4SS-Konsole                              |
+```ini
+[Discord]
+WebhookUrl=https://discord.com/api/webhooks/...
+BotName=Palworld Chat
+AvatarUrl=
+
+[Chat]
+EnableChat=1
+MessageFormat=**{sender}**: {message}
+ShowCategory=1
+
+[JoinLeave]
+EnableJoinLeave=1
+JoinFormat=**{player}** ist dem Server beigetreten
+LeaveFormat=**{player}** hat den Server verlassen
+PollIntervalSeconds=5
+
+[Startup]
+EnableStartupMessage=1
+ServerName=Mein Palworld Server
+StartupTitle=Server Online
+StartupText=**{server}** ist wieder online! Viel Spass beim Spielen!
+StartupEmbedColor=5763719
+StartupDelaySeconds=15
+
+[Misc]
+Debug=0
+```
+
+Platzhalter: `{sender}`, `{message}`, `{channel}` (Chat), `{player}` (Join/Leave), `{server}` (Startup).
+Embed-Farben (dezimal): 5763719 = grün, 15548997 = rot, 3447003 = blau.
+
+## Selbst bauen / CI
+
+- **GitHub Actions**: Jeder Push auf `CppMod/**` baut die DLL automatisch (siehe `.github/workflows/build-dll.yml`).
+  Benötigt das Repo-Secret `EPIC_GITHUB_TOKEN` (GitHub-PAT eines mit Epic verknüpften Accounts, Scope `repo`).
+- **Lokal (Windows)**: siehe `CppMod/README.md`.
 
 ## Funktionsweise
 
-Der Mod hookt die Funktion `/Script/Pal.PalPlayerState:EnterChat_Receive`,
-die bei jeder empfangenen Chatnachricht (Global / Gilde / Sagen) aufgerufen wird.
-Die Nachricht wird als JSON-Payload per `curl` asynchron an den Discord-Webhook gesendet,
-damit der Game-Thread nicht blockiert.
+- **Chat**: `ProcessEvent`-Pre-Callback auf `PalPlayerState:EnterChat_Receive`
+- **Join/Leave**: periodischer Vergleich der `PalPlayerState`-Liste in `on_update()`
+- **Startup-Embed**: Thread mit konfigurierbarer Verzögerung nach `on_unreal_init()`
+- **HTTP**: WinHTTP-POST in eigenem Thread (blockiert das Spiel nicht)
 
-## Hinweise / Troubleshooting
+## Troubleshooting
 
-- **Keine Nachrichten in Discord?**
-  - `Config.Debug = true` setzen und die UE4SS-Konsole prüfen.
-  - Webhook-URL im Browser testen (sollte JSON-Fehler `Method Not Allowed` o.ä. liefern, nicht 404).
-  - Prüfen, ob `curl` verfügbar ist: `curl --version` in `cmd`.
-- **Hook schlägt fehl?**
-  Nach Palworld-Updates können sich Funktionsnamen ändern. Mit dem UE4SS
-  *Object Dumper* prüfen, ob `PalPlayerState:EnterChat_Receive` noch existiert.
-- Auf einem **Dedicated Server** sieht der Mod alle Nachrichten. Als Client/Host
-  nur die Nachrichten, die dein Client empfängt (Global + eigene Gilde + Nähe).
+- `Debug=1` setzen und UE4SS-Konsole prüfen (`ConsoleEnabled=1` in `UE4SS-settings.ini`)
+- Nach Palworld-Updates ggf. prüfen, ob `EnterChat_Receive` noch existiert (UE4SS Object Dumper)

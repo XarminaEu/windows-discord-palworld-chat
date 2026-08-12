@@ -43,22 +43,28 @@ struct RelayConfig
     std::wstring MessageFormat = L"**{sender}**: {message}";
     std::wstring JoinFormat   = L"**{player}** ist dem Server beigetreten";
     std::wstring LeaveFormat  = L"**{player}** hat den Server verlassen";
+    std::wstring ServerName   = L"Mein Palworld Server";
+    std::wstring StartupTitle = L"Server Online";
+    std::wstring StartupText  = L"**{server}** ist wieder online! Viel Spass beim Spielen!";
     bool ShowCategory         = true;
     bool EnableChat           = true;
     bool EnableJoinLeave      = true;
+    bool EnableStartupMessage = true;
+    int  StartupEmbedColor    = 5763719; // gruen
+    int  StartupDelaySeconds  = 15;
     int  PollIntervalSeconds  = 5;
     bool Debug                = false;
 };
 
 static RelayConfig g_config;
 
-static std::wstring GetConfigPath()
+static std::wstring GetThisDllDirectory()
 {
-    // Pfad der eigenen DLL ermitteln -> Config daneben ablegen
+    // Pfad der eigenen DLL ermitteln
     HMODULE hModule = nullptr;
     GetModuleHandleExW(
         GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-        reinterpret_cast<LPCWSTR>(&GetConfigPath), &hModule);
+        reinterpret_cast<LPCWSTR>(&GetThisDllDirectory), &hModule);
 
     wchar_t path[MAX_PATH]{};
     GetModuleFileNameW(hModule, path, MAX_PATH);
@@ -69,7 +75,39 @@ static std::wstring GetConfigPath()
     {
         dir = dir.substr(0, pos + 1);
     }
-    return dir + L"DiscordChatRelay.ini";
+    return dir; // z.B. ...\Mods\DiscordChatRelay\dlls
+}
+
+static std::wstring GetModDirectory()
+{
+    // Mod-Ordner = Elternordner des dlls-Ordners
+    std::wstring dir = GetThisDllDirectory();
+    if (!dir.empty() && (dir.back() == L'\\' || dir.back() == L'/'))
+    {
+        dir.pop_back();
+    }
+    auto pos = dir.find_last_of(L"\\/");
+    if (pos != std::wstring::npos)
+    {
+        dir = dir.substr(0, pos + 1);
+    }
+    return dir; // z.B. ...\Mods\DiscordChatRelay
+}
+
+static std::wstring GetConfigPath()
+{
+    return GetModDirectory() + L"DiscordChatRelay.ini";
+}
+
+static void EnsureModSetup()
+{
+    // enabled.txt automatisch anlegen, damit der Mod aktiv bleibt
+    const std::wstring enabledTxt = GetModDirectory() + L"enabled.txt";
+    if (GetFileAttributesW(enabledTxt.c_str()) == INVALID_FILE_ATTRIBUTES)
+    {
+        std::ofstream f(enabledTxt);
+        Output::send<LogLevel::Verbose>(STR("[DiscordChatRelay] enabled.txt angelegt: {}\n"), enabledTxt);
+    }
 }
 
 static void WriteDefaultConfig(const std::wstring& path)
@@ -101,6 +139,17 @@ static void WriteDefaultConfig(const std::wstring& path)
     out << L"LeaveFormat=" << g_config.LeaveFormat << L"\n";
     out << L"; Pruefintervall der Spielerliste in Sekunden\n";
     out << L"PollIntervalSeconds=5\n\n";
+    out << L"[Startup]\n";
+    out << L"; Beim Serverstart eine Embed-Nachricht senden (1/0)\n";
+    out << L"EnableStartupMessage=1\n";
+    out << L"; Name des Servers ({server} in Titel/Text)\n";
+    out << L"ServerName=" << g_config.ServerName << L"\n";
+    out << L"StartupTitle=" << g_config.StartupTitle << L"\n";
+    out << L"StartupText=" << g_config.StartupText << L"\n";
+    out << L"; Embed-Farbe als Dezimalwert (5763719=gruen, 15548997=rot, 3447003=blau)\n";
+    out << L"StartupEmbedColor=5763719\n";
+    out << L"; Verzoegerung in Sekunden nach Modstart\n";
+    out << L"StartupDelaySeconds=15\n\n";
     out << L"[Misc]\n";
     out << L"; Debug-Ausgaben in der UE4SS-Konsole (1/0)\n";
     out << L"Debug=0\n";
@@ -157,12 +206,19 @@ static void LoadConfig()
     getS(L"MessageFormat", g_config.MessageFormat);
     getS(L"JoinFormat", g_config.JoinFormat);
     getS(L"LeaveFormat", g_config.LeaveFormat);
+    getS(L"ServerName", g_config.ServerName);
+    getS(L"StartupTitle", g_config.StartupTitle);
+    getS(L"StartupText", g_config.StartupText);
     getB(L"ShowCategory", g_config.ShowCategory);
     getB(L"EnableChat", g_config.EnableChat);
     getB(L"EnableJoinLeave", g_config.EnableJoinLeave);
+    getB(L"EnableStartupMessage", g_config.EnableStartupMessage);
     getB(L"Debug", g_config.Debug);
+    getI(L"StartupEmbedColor", g_config.StartupEmbedColor);
+    getI(L"StartupDelaySeconds", g_config.StartupDelaySeconds);
     getI(L"PollIntervalSeconds", g_config.PollIntervalSeconds);
     if (g_config.PollIntervalSeconds < 1) g_config.PollIntervalSeconds = 5;
+    if (g_config.StartupDelaySeconds < 0) g_config.StartupDelaySeconds = 15;
 }
 
 // ------------------------------------------------------------
@@ -215,7 +271,21 @@ static std::wstring ReplaceAll(std::wstring s, const std::wstring& from, const s
 // ------------------------------------------------------------
 // Discord-Webhook (WinHTTP, asynchron)
 // ------------------------------------------------------------
-static void SendToDiscord(const std::wstring& content)
+static std::string BuildCommonFields()
+{
+    std::string fields;
+    if (!g_config.BotName.empty())
+    {
+        fields += ",\"username\":\"" + JsonEscape(WideToUtf8(g_config.BotName)) + "\"";
+    }
+    if (!g_config.AvatarUrl.empty())
+    {
+        fields += ",\"avatar_url\":\"" + JsonEscape(WideToUtf8(g_config.AvatarUrl)) + "\"";
+    }
+    return fields;
+}
+
+static void SendDiscordPayload(const std::string& payload)
 {
     if (g_config.WebhookUrl.find(L"DEINE_WEBHOOK_ID") != std::wstring::npos || g_config.WebhookUrl.empty())
     {
@@ -224,11 +294,9 @@ static void SendToDiscord(const std::wstring& content)
     }
 
     std::wstring url = g_config.WebhookUrl;
-    std::wstring botName = g_config.BotName;
-    std::wstring avatarUrl = g_config.AvatarUrl;
     bool debug = g_config.Debug;
 
-    std::thread([url, botName, avatarUrl, content, debug]() {
+    std::thread([url, payload, debug]() {
         // URL zerlegen
         URL_COMPONENTS uc{};
         uc.dwStructSize = sizeof(uc);
@@ -240,18 +308,6 @@ static void SendToDiscord(const std::wstring& content)
             Output::send<LogLevel::Warning>(STR("[DiscordChatRelay] Ungueltige Webhook-URL.\n"));
             return;
         }
-
-        // JSON-Payload bauen
-        std::string payload = "{\"content\":\"" + JsonEscape(WideToUtf8(content)) + "\"";
-        if (!botName.empty())
-        {
-            payload += ",\"username\":\"" + JsonEscape(WideToUtf8(botName)) + "\"";
-        }
-        if (!avatarUrl.empty())
-        {
-            payload += ",\"avatar_url\":\"" + JsonEscape(WideToUtf8(avatarUrl)) + "\"";
-        }
-        payload += "}";
 
         HINTERNET hSession = WinHttpOpen(L"DiscordChatRelay/1.0",
             WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
@@ -283,6 +339,22 @@ static void SendToDiscord(const std::wstring& content)
         }
         WinHttpCloseHandle(hSession);
     }).detach();
+}
+
+static void SendToDiscord(const std::wstring& content)
+{
+    std::string payload = "{\"content\":\"" + JsonEscape(WideToUtf8(content)) + "\"" + BuildCommonFields() + "}";
+    SendDiscordPayload(payload);
+}
+
+static void SendEmbedToDiscord(const std::wstring& title, const std::wstring& description, int color)
+{
+    std::string payload = "{\"embeds\":[{"
+        "\"title\":\"" + JsonEscape(WideToUtf8(title)) + "\","
+        "\"description\":\"" + JsonEscape(WideToUtf8(description)) + "\","
+        "\"color\":" + std::to_string(color) +
+        "}]" + BuildCommonFields() + "}";
+    SendDiscordPayload(payload);
 }
 
 // ------------------------------------------------------------
@@ -423,8 +495,21 @@ public:
 
     void on_unreal_init() override
     {
+        EnsureModSetup();
         LoadConfig();
         Output::send<LogLevel::Verbose>(STR("[DiscordChatRelay] Mod geladen. Config: {}\n"), GetConfigPath());
+
+        // Server-Online-Embed nach konfigurierbarer Verzoegerung senden
+        if (g_config.EnableStartupMessage)
+        {
+            std::thread([]() {
+                std::this_thread::sleep_for(std::chrono::seconds(g_config.StartupDelaySeconds));
+                std::wstring title = ReplaceAll(g_config.StartupTitle, L"{server}", g_config.ServerName);
+                std::wstring text = ReplaceAll(g_config.StartupText, L"{server}", g_config.ServerName);
+                SendEmbedToDiscord(title, text, g_config.StartupEmbedColor);
+                Output::send<LogLevel::Verbose>(STR("[DiscordChatRelay] Server-Online-Nachricht gesendet.\n"));
+            }).detach();
+        }
 
         Hook::RegisterProcessEventPreCallback(
             [this](UObject* context, UFunction* function, void* parms) {
